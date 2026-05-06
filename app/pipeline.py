@@ -103,19 +103,23 @@ class SentimentTrackingPipeline:
     def train_ml_model(self, training_data_path: Path | None = None) -> Path:
         """Train and persist the configured ML sentiment model."""
         model_path = self.config.model.ml_model_path
-        dataset_path = resolve_training_dataset_path(
+        dataset_paths = resolve_training_dataset_paths(
             explicit_path=training_data_path,
             configured_path=self.config.model.training_data_path,
             processed_output_dir=self.config.paths.processed_output_dir,
         )
-        training_frame = MLSentimentModel.load_training_frame(dataset_path)
+        training_frame = build_training_corpus(dataset_paths)
         label_counts = training_frame["label"].value_counts().to_dict()
-        self.model_selector.train_ml_model(dataset_path, model_path)
+        _, trained_model = self.model_selector.train_ml_model(
+            model_path=model_path,
+            training_frame=training_frame,
+        )
         self.logger.info(
-            "Trained ML model from %s (%s rows, labels=%s) and saved it to %s",
-            dataset_path,
+            "Trained ML model from %s datasets (%s rows, labels=%s, selected_model=%s) and saved it to %s",
+            len(dataset_paths),
             len(training_frame),
             label_counts,
+            trained_model.metadata.get("selected_model"),
             model_path,
         )
         return model_path
@@ -184,27 +188,53 @@ class SentimentTrackingPipeline:
         return directory / filename
 
 
-def resolve_training_dataset_path(
+def resolve_training_dataset_paths(
     explicit_path: Path | None,
     configured_path: Path,
     processed_output_dir: Path,
-) -> Path:
-    """Pick a training dataset, preferring the newest trainable processed export."""
+) -> list[Path]:
+    """Pick training datasets, preferring explicit input or all trainable local corpora."""
     if explicit_path is not None:
-        return explicit_path.resolve()
+        return [explicit_path.resolve()]
 
-    candidates = sorted(
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+    configured_resolved = configured_path.resolve()
+    if configured_resolved.exists():
+        candidates.append(configured_resolved)
+        seen.add(configured_resolved)
+
+    processed_candidates = sorted(
         processed_output_dir.glob("*.csv"),
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )
-    for candidate in candidates:
-        try:
-            training_frame = MLSentimentModel.load_training_frame(candidate)
-        except Exception:
+    for candidate in processed_candidates:
+        resolved = candidate.resolve()
+        if resolved in seen:
             continue
-        if training_frame["label"].nunique() < 2:
-            continue
-        return candidate.resolve()
+        candidates.append(resolved)
+        seen.add(resolved)
 
-    return configured_path.resolve()
+    return candidates
+
+
+def build_training_corpus(dataset_paths: list[Path]) -> pd.DataFrame:
+    """Build a merged, weighted corpus from one or more dataset paths."""
+    frames: list[pd.DataFrame] = []
+    for dataset_path in dataset_paths:
+        try:
+            frames.append(MLSentimentModel.load_training_frame(dataset_path))
+        except ValueError:
+            continue
+
+    if not frames:
+        raise FileNotFoundError(
+            "No trainable CSV datasets were found. "
+            "Provide --training-data or populate data/processed with labeled exports."
+        )
+
+    training_frame = MLSentimentModel.merge_training_frames(frames)
+    if training_frame["label"].nunique() < 2:
+        raise ValueError("At least two distinct labels are required for training.")
+    return training_frame

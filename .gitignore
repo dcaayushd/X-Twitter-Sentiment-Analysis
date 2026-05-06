@@ -12,3 +12,4 @@ data/raw/*.csv
 data/processed/*.csv
 !data/processed/training_sample.csv
 models/*.joblib
+models/*.json

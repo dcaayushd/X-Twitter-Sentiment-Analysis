@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from app.config import AppConfig
 from sentiment.ml_model import MLSentimentModel
@@ -36,13 +37,23 @@ class ModelSelector:
         self._cache[normalized_name] = model
         return model
 
-    def train_ml_model(self, training_data_path: Path, model_path: Path) -> Path:
+    def train_ml_model(
+        self,
+        model_path: Path,
+        training_data_path: Path | None = None,
+        training_frame: Any | None = None,
+    ) -> tuple[Path, MLSentimentModel]:
         """Train and persist a machine-learning sentiment model."""
         model = MLSentimentModel(logger=self.logger)
-        model.train_from_csv(training_data_path)
+        if training_frame is not None:
+            model.train_from_frame(training_frame)
+        elif training_data_path is not None:
+            model.train_from_csv(training_data_path)
+        else:
+            raise ValueError("Either training_data_path or training_frame must be provided.")
         saved_path = model.save(model_path)
         self._cache["ml"] = model
-        return saved_path
+        return saved_path, model
 
     def _load_or_train_ml_model(self) -> MLSentimentModel:
         model_path = self.config.model.ml_model_path
