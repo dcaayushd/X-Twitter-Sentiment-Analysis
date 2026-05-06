@@ -372,6 +372,55 @@ def test_fetch_tweets_falls_back_to_news_rss_when_primary_returns_zero(
     assert tweets == [fallback_tweet]
 
 
+def test_fetch_batch_records_requested_resolved_and_served_backends(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    scraper = TwitterScraper(
+        backend="auto",
+        max_retries=3,
+        backoff_factor=1.5,
+        twscrape_accounts_db=tmp_path / "unused.db",
+        logger=logging.getLogger("test.ingestion"),
+    )
+    fallback_tweet = RawTweet(
+        tweet_id="news-1",
+        created_at=datetime(2026, 5, 6, tzinfo=timezone.utc),
+        username="axios",
+        display_name="Axios",
+        content="OpenAI launches self-serve ad platform",
+        url="https://example.com/openai-ad-platform",
+        raw_payload={"source_type": "google_news_rss"},
+    )
+
+    monkeypatch.setattr(scraper, "_log_backend_query", lambda backend, params: None)
+    monkeypatch.setattr(
+        scraper,
+        "resolve_backend_request",
+        lambda backend_override=None: ("auto", "twscrape"),
+    )
+    monkeypatch.setattr(
+        scraper,
+        "_execute_backend_fetch",
+        lambda backend, params: [] if backend == "twscrape" else [fallback_tweet],
+    )
+
+    batch = scraper.fetch_batch(
+        SearchParameters(
+            keyword="openai",
+            hashtags=["AI"],
+            start_date=date(2026, 5, 1),
+            end_date=date(2026, 5, 6),
+            max_results=25,
+        )
+    )
+
+    assert batch.requested_backend == "auto"
+    assert batch.resolved_backend == "twscrape"
+    assert batch.served_backend == "news_rss"
+    assert batch.fallback_used is True
+    assert batch.tweets == [fallback_tweet]
+
+
 def test_fetch_with_news_rss_parses_and_filters_items(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

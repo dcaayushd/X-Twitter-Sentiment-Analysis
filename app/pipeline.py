@@ -12,7 +12,12 @@ from typing import Iterable
 import pandas as pd
 
 from app.config import AppConfig
-from app.schemas import AnalyzedTweet, PipelineRunResult, SearchParameters, SentimentPrediction
+from app.schemas import (
+    AnalyzedTweet,
+    PipelineRunResult,
+    SearchParameters,
+    SentimentPrediction,
+)
 from ingestion.scraper import IngestionError, TwitterScraper
 from processing.cleaner import TextCleaner
 from processing.tokenizer import SpacyTokenizer
@@ -46,19 +51,27 @@ class SentimentTrackingPipeline:
         self,
         search_parameters: SearchParameters,
         model_name: str | None = None,
+        backend_override: str | None = None,
     ) -> PipelineRunResult:
         """Execute the full pipeline and persist the analyzed tweets."""
         search_parameters.validate()
         selected_model_name = (model_name or self.config.model.active_model).lower()
         model = self.model_selector.get_model(selected_model_name)
+        requested_backend, resolved_backend = self.scraper.resolve_backend_request(backend_override)
         run_id = self.repository.create_ingestion_run(
             source_query=search_parameters.source_query,
             model_name=selected_model_name,
+            requested_backend=requested_backend,
+            resolved_backend=resolved_backend,
         )
 
         try:
             self.logger.info("Starting ingestion for %s", search_parameters.source_query)
-            raw_tweets = self.scraper.fetch_tweets(search_parameters)
+            batch = self.scraper.fetch_batch(
+                search_parameters=search_parameters,
+                backend_override=backend_override,
+            )
+            raw_tweets = batch.tweets
             self.logger.info("Collected %s tweets", len(raw_tweets))
 
             analyzed_tweets = [self._analyze_tweet(tweet, model.predict) for tweet in raw_tweets]
@@ -67,16 +80,20 @@ class SentimentTrackingPipeline:
                 run_id=run_id,
                 tweet_ids=[tweet.raw_tweet.tweet_id for tweet in analyzed_tweets],
             )
-            self.repository.complete_ingestion_run(
-                run_id=run_id,
-                total_collected=len(raw_tweets),
-                total_stored=stored_count,
-            )
 
             raw_export_path = self._export_raw_tweets(raw_tweets, search_parameters.source_query)
             processed_export_path = self._export_processed_tweets(
                 analyzed_tweets,
                 search_parameters.source_query,
+            )
+            self.repository.complete_ingestion_run(
+                run_id=run_id,
+                total_collected=len(raw_tweets),
+                total_stored=stored_count,
+                served_backend=batch.served_backend,
+                fallback_used=batch.fallback_used,
+                raw_export_path=str(raw_export_path) if raw_export_path else None,
+                processed_export_path=str(processed_export_path) if processed_export_path else None,
             )
             self.logger.info(
                 "Pipeline completed for run_id=%s with model=%s",
@@ -89,6 +106,10 @@ class SentimentTrackingPipeline:
                 model_name=selected_model_name,
                 collected_count=len(raw_tweets),
                 stored_count=stored_count,
+                requested_backend=batch.requested_backend,
+                resolved_backend=batch.resolved_backend,
+                served_backend=batch.served_backend,
+                fallback_used=batch.fallback_used,
                 raw_export_path=str(raw_export_path) if raw_export_path else None,
                 processed_export_path=str(processed_export_path) if processed_export_path else None,
             )

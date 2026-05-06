@@ -94,6 +94,39 @@ def build_sentiment_distribution_chart(
     return figure
 
 
+def build_source_breakdown_chart(frame: pd.DataFrame) -> go.Figure:
+    """Build a ranked source/activity chart for the selected run."""
+    if frame.empty:
+        return _empty_figure("No source breakdown is available for this run.")
+
+    chart_frame = frame.head(10).copy().sort_values("tweet_count", ascending=True)
+    chart_frame["source_label"] = chart_frame["display_name"].fillna("").where(
+        chart_frame["display_name"].fillna("").str.len() > 0,
+        chart_frame["username"],
+    )
+    figure = px.bar(
+        chart_frame,
+        x="tweet_count",
+        y="source_label",
+        orientation="h",
+        color="average_sentiment",
+        color_continuous_scale=["#C0392B", "#F1C40F", "#2E8B57"],
+        hover_data={
+            "username": True,
+            "average_confidence": ":.2f",
+            "average_engagement": ":.2f",
+            "average_sentiment": ":.3f",
+            "tweet_count": True,
+            "source_label": False,
+        },
+        title="Top Sources by Volume",
+    )
+    figure.update_layout(template="plotly_white", coloraxis_colorbar_title="Avg Sentiment")
+    figure.update_xaxes(title_text="Items Collected")
+    figure.update_yaxes(title_text="Source")
+    return figure
+
+
 def _empty_figure(message: str) -> go.Figure:
     figure = go.Figure()
     figure.update_layout(

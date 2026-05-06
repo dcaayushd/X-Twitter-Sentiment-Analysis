@@ -66,6 +66,17 @@ class RawTweet:
 
 
 @dataclass(frozen=True)
+class IngestionBatch:
+    """Tweets returned from one pipeline fetch attempt plus backend metadata."""
+
+    tweets: list[RawTweet]
+    requested_backend: str
+    resolved_backend: str
+    served_backend: str
+    fallback_used: bool = False
+
+
+@dataclass(frozen=True)
 class SentimentPrediction:
     """Prediction returned by a sentiment model."""
 
@@ -94,5 +105,9 @@ class PipelineRunResult:
     model_name: str
     collected_count: int
     stored_count: int
+    requested_backend: str
+    resolved_backend: str
+    served_backend: str
+    fallback_used: bool = False
     raw_export_path: str | None = None
     processed_export_path: str | None = None

@@ -16,20 +16,43 @@ class TweetRepository:
     def __init__(self, database: DatabaseManager) -> None:
         self.database = database
 
-    def create_ingestion_run(self, source_query: str, model_name: str) -> int:
+    def create_ingestion_run(
+        self,
+        source_query: str,
+        model_name: str,
+        requested_backend: str,
+        resolved_backend: str,
+    ) -> int:
         """Create a run record before pipeline execution starts."""
         started_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         with self.database.connect() as connection:
             cursor = connection.execute(
                 """
-                INSERT INTO ingestion_runs (source_query, model_name, status, started_at)
-                VALUES (?, ?, 'running', ?)
+                INSERT INTO ingestion_runs (
+                    source_query,
+                    model_name,
+                    requested_backend,
+                    resolved_backend,
+                    served_backend,
+                    status,
+                    started_at
+                )
+                VALUES (?, ?, ?, ?, 'unknown', 'running', ?)
                 """,
-                (source_query, model_name, started_at),
+                (source_query, model_name, requested_backend, resolved_backend, started_at),
             )
             return int(cursor.lastrowid)
 
-    def complete_ingestion_run(self, run_id: int, total_collected: int, total_stored: int) -> None:
+    def complete_ingestion_run(
+        self,
+        run_id: int,
+        total_collected: int,
+        total_stored: int,
+        served_backend: str,
+        fallback_used: bool,
+        raw_export_path: str | None,
+        processed_export_path: str | None,
+    ) -> None:
         """Mark an ingestion run as complete."""
         completed_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         with self.database.connect() as connection:
@@ -39,10 +62,23 @@ class TweetRepository:
                 SET status = 'completed',
                     total_collected = ?,
                     total_stored = ?,
+                    served_backend = ?,
+                    fallback_used = ?,
+                    raw_export_path = ?,
+                    processed_export_path = ?,
                     completed_at = ?
                 WHERE id = ?
                 """,
-                (total_collected, total_stored, completed_at, run_id),
+                (
+                    total_collected,
+                    total_stored,
+                    served_backend,
+                    int(fallback_used),
+                    raw_export_path,
+                    processed_export_path,
+                    completed_at,
+                    run_id,
+                ),
             )
 
     def fail_ingestion_run(self, run_id: int, error_message: str) -> None:
@@ -72,6 +108,7 @@ class TweetRepository:
                     tweet.raw_tweet.display_name,
                     tweet.raw_tweet.created_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                     tweet.raw_tweet.content,
+                    tweet.raw_tweet.url,
                     tweet.cleaned_text,
                     json.dumps(tweet.tokens),
                     tweet.sentiment.label,
@@ -97,6 +134,7 @@ class TweetRepository:
                     display_name,
                     created_at,
                     content,
+                    url,
                     cleaned_text,
                     tokens,
                     sentiment_label,
@@ -107,12 +145,13 @@ class TweetRepository:
                     lang,
                     raw_payload,
                     updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(tweet_id) DO UPDATE SET
                     username = excluded.username,
                     display_name = excluded.display_name,
                     created_at = excluded.created_at,
                     content = excluded.content,
+                    url = excluded.url,
                     cleaned_text = excluded.cleaned_text,
                     tokens = excluded.tokens,
                     sentiment_label = excluded.sentiment_label,
@@ -206,6 +245,88 @@ class TweetRepository:
             ).fetchone()
         return dict(row) if row else {}
 
+    def fetch_recent_runs(self, limit: int = 20) -> list[dict]:
+        """Return the most recent ingestion runs with backend metadata."""
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    id,
+                    source_query,
+                    model_name,
+                    status,
+                    error_message,
+                    total_collected,
+                    total_stored,
+                    requested_backend,
+                    resolved_backend,
+                    served_backend,
+                    fallback_used,
+                    raw_export_path,
+                    processed_export_path,
+                    started_at,
+                    completed_at
+                FROM ingestion_runs
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def fetch_run_details(self, run_id: int) -> dict:
+        """Return one run record with backend provenance and exports."""
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    id,
+                    source_query,
+                    model_name,
+                    status,
+                    error_message,
+                    total_collected,
+                    total_stored,
+                    requested_backend,
+                    resolved_backend,
+                    served_backend,
+                    fallback_used,
+                    raw_export_path,
+                    processed_export_path,
+                    started_at,
+                    completed_at
+                FROM ingestion_runs
+                WHERE id = ?
+                """,
+                (run_id,),
+            ).fetchone()
+        return dict(row) if row else {}
+
+    def fetch_source_breakdown(self, run_id: int, limit: int = 15) -> list[dict]:
+        """Return the most active sources/accounts for a run."""
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    t.display_name,
+                    t.username,
+                    COUNT(*) AS tweet_count,
+                    AVG(t.sentiment_score) AS average_sentiment,
+                    AVG(t.sentiment_confidence) AS average_confidence,
+                    AVG(t.like_count + t.retweet_count) AS average_engagement,
+                    MIN(t.created_at) AS first_seen,
+                    MAX(t.created_at) AS last_seen
+                FROM tweets t
+                INNER JOIN ingestion_run_tweets irt ON irt.tweet_id = t.tweet_id
+                WHERE irt.run_id = ?
+                GROUP BY t.display_name, t.username
+                ORDER BY tweet_count DESC, average_sentiment DESC
+                LIMIT ?
+                """,
+                (run_id, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def fetch_recent_tweets(self, run_id: int, limit: int = 100) -> list[dict]:
         """Return recently created tweets for a run."""
         with self.database.connect() as connection:
@@ -217,10 +338,13 @@ class TweetRepository:
                     t.username,
                     t.display_name,
                     t.content,
+                    t.url,
                     t.cleaned_text,
                     t.sentiment_label,
                     t.sentiment_score,
-                    t.sentiment_confidence
+                    t.sentiment_confidence,
+                    t.like_count,
+                    t.retweet_count
                 FROM tweets t
                 INNER JOIN ingestion_run_tweets irt ON irt.tweet_id = t.tweet_id
                 WHERE irt.run_id = ?

@@ -130,7 +130,7 @@ python -m app.main run
 If you want to override the backend explicitly:
 
 ```bash
-python -m app.main --config config/config.yaml run
+python -m app.main run --backend news_rss
 ```
 
 Override the search parameters from the CLI:
@@ -142,6 +142,7 @@ python -m app.main run \
   --start-date 2026-05-01 \
   --end-date 2026-05-06 \
   --max-results 250 \
+  --backend twscrape \
   --model vader
 ```
 
@@ -195,10 +196,15 @@ The dashboard supports:
 
 - keyword and hashtag inputs
 - date range filtering
+- backend selection per run
 - dynamic model selection
 - hourly or daily trend views
 - interactive Plotly charts
-- summary metrics and recent analyzed tweets
+- run provenance showing requested/resolved/served backend and fallback usage
+- run history inspection for the most recent stored runs
+- CSV export downloads and processed-export previews
+- source breakdown analysis and recent analyzed tweets
+- ML model metadata and validation-score inspection
 
 ## Testing
 

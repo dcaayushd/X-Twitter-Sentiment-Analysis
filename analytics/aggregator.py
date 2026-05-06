@@ -46,3 +46,53 @@ def build_distribution_frame(rows: list[dict]) -> pd.DataFrame:
     total = frame["count"].sum()
     frame["percentage"] = (frame["count"] / total * 100.0) if total else 0.0
     return frame
+
+
+def build_source_breakdown_frame(rows: list[dict]) -> pd.DataFrame:
+    """Convert repository source rows into a chart-ready DataFrame."""
+    columns = [
+        "display_name",
+        "username",
+        "tweet_count",
+        "average_sentiment",
+        "average_confidence",
+        "average_engagement",
+        "first_seen",
+        "last_seen",
+    ]
+    if not rows:
+        return pd.DataFrame(columns=columns)
+
+    frame = pd.DataFrame(rows)
+    for column in ("first_seen", "last_seen"):
+        frame[column] = pd.to_datetime(frame[column], utc=True, errors="coerce")
+    for column in ("average_sentiment", "average_confidence", "average_engagement"):
+        frame[column] = frame[column].fillna(0.0).astype(float)
+    frame["tweet_count"] = frame["tweet_count"].fillna(0).astype(int)
+    return frame.sort_values(["tweet_count", "average_sentiment"], ascending=[False, False])
+
+
+def build_run_history_frame(rows: list[dict]) -> pd.DataFrame:
+    """Convert recent run rows into a display-friendly DataFrame."""
+    columns = [
+        "id",
+        "status",
+        "model_name",
+        "requested_backend",
+        "resolved_backend",
+        "served_backend",
+        "fallback_used",
+        "total_collected",
+        "total_stored",
+        "started_at",
+        "completed_at",
+        "source_query",
+    ]
+    if not rows:
+        return pd.DataFrame(columns=columns)
+
+    frame = pd.DataFrame(rows)
+    for column in ("started_at", "completed_at"):
+        frame[column] = pd.to_datetime(frame[column], utc=True, errors="coerce")
+    frame["fallback_used"] = frame["fallback_used"].fillna(0).astype(bool)
+    return frame

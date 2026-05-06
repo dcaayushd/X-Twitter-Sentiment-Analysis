@@ -39,6 +39,11 @@ def parse_args() -> argparse.Namespace:
     run_parser.add_argument("--end-date", help="End date in YYYY-MM-DD format.")
     run_parser.add_argument("--max-results", type=int, help="Maximum number of tweets to collect.")
     run_parser.add_argument(
+        "--backend",
+        choices=["auto", "snscrape", "twscrape", "x_api", "news_rss"],
+        help="Override the configured ingestion backend.",
+    )
+    run_parser.add_argument(
         "--model",
         choices=["vader", "ml"],
         help="Override the configured sentiment model.",
@@ -124,6 +129,7 @@ def main() -> int:
         result = pipeline.run(
             search_parameters=search_parameters,
             model_name=getattr(args, "model", None),
+            backend_override=getattr(args, "backend", None),
         )
     except IngestionError as exc:
         logger.error("%s", exc)

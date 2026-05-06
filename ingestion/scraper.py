@@ -24,7 +24,7 @@ from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 import xml.etree.ElementTree as ET
 
-from app.schemas import RawTweet, SearchParameters
+from app.schemas import IngestionBatch, RawTweet, SearchParameters
 from ingestion.retry import execute_with_retry
 
 
@@ -292,6 +292,8 @@ def _load_twscrape_credentials_from_env() -> TwscrapeCredentials | None:
 class TwitterScraper:
     """Collect tweets from Twitter/X using the official API or scraping backends."""
 
+    SUPPORTED_BACKENDS = {"auto", "snscrape", "twscrape", "x_api", "news_rss"}
+
     def __init__(
         self,
         backend: str,
@@ -306,15 +308,20 @@ class TwitterScraper:
         self.twscrape_accounts_db = twscrape_accounts_db
         self.logger = logger
 
-    def fetch_tweets(self, search_parameters: SearchParameters) -> list[RawTweet]:
-        """Fetch tweets for the provided search parameters."""
+    def fetch_batch(
+        self,
+        search_parameters: SearchParameters,
+        backend_override: str | None = None,
+    ) -> IngestionBatch:
+        """Fetch tweets and capture which backend ultimately served the data."""
         search_parameters.validate()
-        primary_backend = self._resolve_backend()
+        requested_backend, primary_backend = self.resolve_backend_request(backend_override)
         backends = [primary_backend]
         if primary_backend != "news_rss":
             backends.append("news_rss")
 
         last_error: Exception | None = None
+        last_served_backend = primary_backend
 
         for index, backend in enumerate(backends):
             self._log_backend_query(backend, search_parameters)
@@ -333,6 +340,7 @@ class TwitterScraper:
                     continue
                 raise
 
+            last_served_backend = backend
             if tweets:
                 if backend != primary_backend:
                     self.logger.info(
@@ -341,7 +349,13 @@ class TwitterScraper:
                         len(tweets),
                         search_parameters.source_query,
                     )
-                return tweets
+                return IngestionBatch(
+                    tweets=tweets,
+                    requested_backend=requested_backend,
+                    resolved_backend=primary_backend,
+                    served_backend=backend,
+                    fallback_used=backend != primary_backend,
+                )
 
             if index + 1 < len(backends):
                 self.logger.warning(
@@ -355,7 +369,17 @@ class TwitterScraper:
         if last_error is not None:
             raise last_error
 
-        return []
+        return IngestionBatch(
+            tweets=[],
+            requested_backend=requested_backend,
+            resolved_backend=primary_backend,
+            served_backend=last_served_backend,
+            fallback_used=last_served_backend != primary_backend,
+        )
+
+    def fetch_tweets(self, search_parameters: SearchParameters) -> list[RawTweet]:
+        """Fetch tweets for the provided search parameters."""
+        return self.fetch_batch(search_parameters).tweets
 
     @staticmethod
     def build_query(search_parameters: SearchParameters) -> str:
@@ -420,10 +444,23 @@ class TwitterScraper:
 
         return deduped
 
+    def resolve_backend_request(self, backend_override: str | None = None) -> tuple[str, str]:
+        """Return the requested backend and the resolved concrete backend."""
+        requested_backend = (backend_override or self.backend).lower()
+        if requested_backend not in self.SUPPORTED_BACKENDS:
+            raise NonRetryableIngestionError(
+                f"Unsupported ingestion backend: {requested_backend}"
+            )
+        return requested_backend, self._resolve_backend_name(requested_backend)
+
     def _resolve_backend(self) -> str:
         """Choose the configured backend, or infer one in auto mode."""
-        if self.backend != "auto":
-            return self.backend
+        return self._resolve_backend_name(self.backend)
+
+    def _resolve_backend_name(self, backend_name: str) -> str:
+        """Resolve a backend name, expanding `auto` based on available credentials."""
+        if backend_name != "auto":
+            return backend_name
 
         if _load_x_bearer_token() is not None:
             return "x_api"
