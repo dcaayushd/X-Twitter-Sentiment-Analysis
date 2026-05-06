@@ -159,7 +159,15 @@ Train the scikit-learn sentiment model from the bundled sample dataset or your o
 python -m app.main train-ml
 ```
 
-When no `--training-data` path is provided, the command now prefers the newest trainable CSV in `data/processed/` and falls back to the configured sample dataset only if no recent processed export is suitable.
+When no `--training-data` path is provided, the command now builds a combined corpus from all trainable CSVs in `data/processed/` plus the configured seed dataset, and only falls back to the seed dataset alone if no processed export is suitable.
+
+The trainer now also:
+
+- merges all trainable processed exports plus the seed labeled dataset
+- deduplicates repeated texts across runs
+- downweights weaker pseudo-labels from processed exports using sentiment confidence/score
+- evaluates multiple candidate pipelines and selects the best one by validation macro F1
+- writes model metadata to `models/sentiment_model.metadata.json`
 
 Custom dataset example:
 
@@ -207,4 +215,4 @@ pytest
 - `twscrape` requires an authenticated X account or fresh cookies to access search reliably.
 - `news_rss` is a non-X fallback. It returns topical headlines, not actual tweets, but it keeps the downstream sentiment pipeline usable when X blocks search.
 - The rule-based model uses the standalone `vaderSentiment` package, so no separate lexicon download is required.
-- The sample training dataset in `data/processed/training_sample.csv` is intended for bootstrapping and testing, not for production-grade model quality.
+- The sample training dataset in `data/processed/training_sample.csv` is intended for bootstrapping and testing.

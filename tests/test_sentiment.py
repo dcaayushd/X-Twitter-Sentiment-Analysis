@@ -51,9 +51,44 @@ def test_ml_model_load_training_frame_accepts_processed_export_columns(tmp_path)
 
     frame = MLSentimentModel.load_training_frame(dataset_path)
 
-    assert list(frame.columns) == ["text", "label"]
+    assert list(frame.columns) == ["text", "label", "sample_weight", "source_path", "source_kind"]
     assert frame.to_dict(orient="records") == [
-        {"text": "love this product", "label": "positive"},
-        {"text": "hate this product", "label": "negative"},
-        {"text": "it is fine", "label": "neutral"},
+        {
+            "text": "love this product",
+            "label": "positive",
+            "sample_weight": frame.iloc[0]["sample_weight"],
+            "source_path": str(dataset_path.resolve()),
+            "source_kind": "processed_export",
+        },
+        {
+            "text": "hate this product",
+            "label": "negative",
+            "sample_weight": frame.iloc[1]["sample_weight"],
+            "source_path": str(dataset_path.resolve()),
+            "source_kind": "processed_export",
+        },
+        {
+            "text": "it is fine",
+            "label": "neutral",
+            "sample_weight": frame.iloc[2]["sample_weight"],
+            "source_path": str(dataset_path.resolve()),
+            "source_kind": "processed_export",
+        },
     ]
+
+
+def test_ml_model_save_and_load_preserves_metadata(tmp_path) -> None:
+    model = MLSentimentModel()
+    model.train(
+        texts=["love this", "hate this", "it is fine"],
+        labels=["positive", "negative", "neutral"],
+        training_metadata={"source_paths": ["seed.csv"]},
+    )
+
+    model_path = tmp_path / "sentiment_model.joblib"
+    model.save(model_path)
+    loaded_model = MLSentimentModel.load(model_path)
+
+    assert loaded_model.metadata["artifact_version"] == 2
+    assert loaded_model.metadata["source_paths"] == ["seed.csv"]
+    assert "selected_model" in loaded_model.metadata
