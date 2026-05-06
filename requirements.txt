@@ -1,0 +1,12 @@
+certifi>=2025.0,<2027
+joblib>=1.4,<2
+pandas>=2.2,<3
+plotly>=5.22,<6
+PyYAML>=6.0,<7
+pytest>=8.2,<9
+scikit-learn>=1.5,<2
+snscrape>=0.7,<0.8
+spacy>=3.7,<4
+streamlit>=1.35,<2
+twscrape>=0.17,<0.18
+vaderSentiment>=3.3,<4

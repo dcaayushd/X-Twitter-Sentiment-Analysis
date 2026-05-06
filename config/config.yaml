@@ -1,0 +1,43 @@
+ingestion:
+  # x_api: official X API recent search using Bearer_Token from .env or env vars
+  # auto: prefer x_api, then twscrape, then snscrape
+  # snscrape: unauthenticated scraping, often blocked by X
+  # twscrape: authenticated scraping via TWITTER_* environment variables or an existing accounts DB
+  # news_rss: Google News RSS fallback that returns topical headlines in RawTweet format
+  backend: "twscrape"
+  max_retries: 3
+  backoff_factor: 1.5
+  twscrape_accounts_db: "data/twscrape_accounts.db"
+
+search:
+  keyword: "openai"
+  hashtags:
+    - "AI"
+    - "MachineLearning"
+  start_date: "2026-05-01"
+  end_date: "2026-05-06"
+  max_results: 100
+
+processing:
+  # spacy_model: "blank_en"
+  spacy_model: "en_core_web_sm"
+
+model:
+  active_model: "vader"
+  ml_model_path: "models/sentiment_model.joblib"
+  training_data_path: "data/processed/training_sample.csv"
+  auto_train_if_missing: true
+
+database:
+  path: "data/twitter_sentiment.db"
+
+paths:
+  raw_output_dir: "data/raw"
+  processed_output_dir: "data/processed"
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+
+dashboard:
+  title: "Twitter/X Sentiment Tracker"
